@@ -1,0 +1,36 @@
+public class RetroRevAdjuster {
+
+    public static void rebuildRevenue(Id subscriptionId, Date retroDate) {
+        List<RevenueSchedule__c> schedules = [
+            SELECT Id, Amount__c, Period_Start__c, Period_End__c
+            FROM RevenueSchedule__c
+            WHERE Subscription__c = :subscriptionId
+            ORDER BY Period_Start__c
+        ];
+
+        Decimal oldTotal = sum(schedules);
+        Decimal newTotal = calculateNewTotal(subscriptionId);
+
+        Decimal delta = newTotal - oldTotal;
+        if (delta == 0) return;
+
+        // Reverse all future unrecognized schedules
+        List<RevenueSchedule__c> reversals = new List<RevenueSchedule__c>();
+        for (RevenueSchedule__c rs : schedules) {
+            if (rs.Period_Start__c >= retroDate) {
+                reversals.add(new RevenueSchedule__c(
+                    Subscription__c = rs.Subscription__c,
+                    Period_Start__c = rs.Period_Start__c,
+                    Period_End__c = rs.Period_End__c,
+                    Amount__c = -rs.Amount__c,
+                    Type__c = 'REVERSAL'
+                ));
+            }
+        }
+
+        insert reversals;
+        insert buildReplacementSchedules(subscriptionId, delta, retroDate);
+
+        Ledger_Log__c.log('REV_RETIME', subscriptionId, delta);
+    }
+}
